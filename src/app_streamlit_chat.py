@@ -76,6 +76,16 @@ def analyze_pathway_options(profile, df_merged):
     else:
         df_filtered = df_merged.copy()
 
+    # Filter by zip code radius BEFORE income filtering
+    if profile.zip_code and profile.radius_miles:
+        from src.distance_utils import filter_by_radius
+        print(f"  [Pathway] Applying radius filter: {profile.radius_miles} miles from zip {profile.zip_code}")
+        df_filtered = filter_by_radius(df_filtered, profile.zip_code, profile.radius_miles)
+        print(f"  [Pathway] After radius filter: {len(df_filtered)} institutions")
+    elif profile.zip_code:
+        from src.distance_utils import add_distance_column
+        df_filtered = add_distance_column(df_filtered, profile.zip_code)
+
     # Filter by income bracket if available
     # Note: The affordability gap data is mostly for low-income ($30k ceiling)
     # For pathway analysis, we'll use the most complete dataset (30k) since
@@ -426,7 +436,9 @@ def chat_collect_profile():
         "Which state are you from? (Enter 2-letter state code like CA, NY, TX, etc.)",
         "Do you want to only consider colleges in your home state? (yes/no)",
         "Do you prefer public schools only? (yes/no)",
-        "What school size do you prefer? (Small, Medium, Large, or 'any' if no preference)"
+        "What school size do you prefer? (Small, Medium, Large, or 'any' if no preference)",
+        "Do you want to search for colleges near you? Enter your 5-digit zip code, or type 'skip' to search all locations:",
+        "How many miles away are you willing to travel for college? (e.g., 50, 100, 200, or 'any' for no limit)"
     ]
 
     # Display chat history
@@ -522,6 +534,32 @@ def chat_collect_profile():
                 elif 'large' in size_input:
                     size = 'Large'
                 st.session_state.profile_data['school_size_pref'] = size
+            elif step == 11:  # Zip code
+                zip_input = user_input.strip().lower()
+                if zip_input == 'skip' or zip_input == '':
+                    st.session_state.profile_data['zip_code'] = None
+                else:
+                    # Extract digits only
+                    zip_digits = ''.join(filter(str.isdigit, user_input))
+                    if len(zip_digits) == 5:
+                        st.session_state.profile_data['zip_code'] = zip_digits
+                    else:
+                        st.session_state.profile_data['zip_code'] = None
+            elif step == 12:  # Radius
+                # Only ask radius if zip code was provided
+                if st.session_state.profile_data.get('zip_code'):
+                    radius_input = user_input.strip().lower()
+                    if radius_input == 'any' or radius_input == 'skip' or radius_input == '':
+                        st.session_state.profile_data['radius_miles'] = None
+                    else:
+                        try:
+                            radius = int(''.join(filter(str.isdigit, user_input)))
+                            st.session_state.profile_data['radius_miles'] = radius if radius > 0 else None
+                        except:
+                            st.session_state.profile_data['radius_miles'] = None
+                else:
+                    # Skip radius question if no zip code
+                    st.session_state.profile_data['radius_miles'] = None
 
             st.session_state.chat_step += 1
             st.rerun()
@@ -542,7 +580,9 @@ def chat_collect_profile():
                 in_state_only=st.session_state.profile_data.get('in_state_only', False),
                 state=st.session_state.profile_data.get('state'),
                 public_only=st.session_state.profile_data.get('public_only', False),
-                school_size_pref=st.session_state.profile_data.get('school_size_pref')
+                school_size_pref=st.session_state.profile_data.get('school_size_pref'),
+                zip_code=st.session_state.profile_data.get('zip_code'),
+                radius_miles=st.session_state.profile_data.get('radius_miles')
             )
 
             # Save profile to session state for persistence
@@ -691,9 +731,26 @@ def main():
                     public_only = st.checkbox("Only show public schools")
                     school_size = st.selectbox("Preferred School Size", ["Any", "Small", "Medium", "Large"], index=0)
 
+                st.markdown("**Location Preferences (Optional)**")
+                col3, col4 = st.columns(2)
+                with col3:
+                    zip_code_input = st.text_input("Your Zip Code (5 digits)", placeholder="90210", help="Leave blank to search all locations")
+                with col4:
+                    radius = st.number_input("Max Distance (miles)", min_value=0, value=0, step=10, help="0 = no limit")
+
                 submitted = st.form_submit_button("Find My Matches")
 
                 if submitted:
+                    # Process zip code
+                    zip_code = None
+                    if zip_code_input:
+                        zip_digits = ''.join(filter(str.isdigit, zip_code_input))
+                        if len(zip_digits) == 5:
+                            zip_code = zip_digits
+
+                    # Process radius
+                    radius_miles = radius if radius > 0 and zip_code else None
+
                     profile = UserProfile(
                         race=race,
                         is_parent=is_parent,
@@ -704,7 +761,9 @@ def main():
                         in_state_only=in_state_only,
                         state=state if state else None,
                         public_only=public_only,
-                        school_size_pref=school_size if school_size != "Any" else None
+                        school_size_pref=school_size if school_size != "Any" else None,
+                        zip_code=zip_code,
+                        radius_miles=radius_miles
                     )
                     # Save profile to session state for persistence
                     st.session_state.saved_profile = profile
@@ -770,6 +829,9 @@ def main():
                     with col_a:
                         st.markdown("**📍 Location & Type**")
                         st.write(f"State: {row.get('State of Institution', 'N/A')}")
+                        # Show distance if available
+                        if 'distance_miles' in row.index and pd.notna(row['distance_miles']):
+                            st.write(f"Distance: {row['distance_miles']:.1f} miles from you")
                         st.write(f"Sector: {row.get('Sector of Institution', 'N/A')}")
                         st.write(f"Archetype: {row.get('cluster_label', 'N/A')}")
 

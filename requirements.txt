@@ -12,3 +12,4 @@ anthropic>=0.39.0
 python-dotenv>=1.0.0
 folium>=0.14.0
 streamlit-folium>=0.15.0
+pgeocode>=0.5.0

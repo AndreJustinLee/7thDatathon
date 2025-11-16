@@ -294,6 +294,19 @@ def build_featured_college_df(data_dir='data'):
     print(f"\nStarting with {len(df)} institutions")
     print(f"Starting with {len(df.columns)} columns")
 
+    # Ensure latitude/longitude columns are available (standardize to 'Latitude' and 'Longitude')
+    # The College Results data has 'Latitude' and 'Longitude' (title case) with float values
+    if 'Latitude' not in df.columns and 'LATITUDE' in df.columns:
+        df['Latitude'] = pd.to_numeric(df['LATITUDE'], errors='coerce')
+    if 'Longitude' not in df.columns and 'LONGITUDE' in df.columns:
+        df['Longitude'] = pd.to_numeric(df['LONGITUDE'], errors='coerce')
+    
+    # Ensure they're float type
+    if 'Latitude' in df.columns:
+        df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
+    if 'Longitude' in df.columns:
+        df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
+
     # Apply all feature engineering steps
     df = add_roi_score(df)
     df = add_affordability_scores(df)
@@ -302,6 +315,11 @@ def build_featured_college_df(data_dir='data'):
 
     print(f"\n✓ Feature engineering complete!")
     print(f"Final dataset: {len(df)} rows, {len(df.columns)} columns")
+    
+    # Verify latitude/longitude columns are still present
+    if 'Latitude' in df.columns and 'Longitude' in df.columns:
+        coord_count = df[['Latitude', 'Longitude']].notna().all(axis=1).sum()
+        print(f"  Institutions with coordinates: {coord_count} ({coord_count/len(df)*100:.1f}%)")
 
     # Display summary of key scores
     print("\n" + "="*60)
